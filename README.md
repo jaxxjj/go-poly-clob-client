@@ -113,12 +113,14 @@ PostHeartbeat(ctx, heartbeatID) (json.RawMessage, error)
 
 ```go
 polyclob.NewL1(host, chainID, privateKeyHex,
-    polyclob.WithSignatureType(model.PolyProxy),     // proxy wallet
-    polyclob.WithFunder("0x..."),                     // funder address
+    polyclob.WithSignatureType(model.PolyProxy),     // proxy wallet (default for Polymarket UI wallets)
+    polyclob.WithFunder("0x..."),                     // funder address (if different from signer)
     polyclob.WithHTTPClient(customHTTPClient),        // custom http.Client
-    polyclob.WithTickSizeTTL(10 * time.Minute),       // cache duration
+    polyclob.WithTickSizeTTL(10 * time.Minute),       // tick size cache duration
 )
 ```
+
+> Most wallets created via the Polymarket UI use `PolyProxy` (signature type 1). Use `EOA` (0) only for raw externally-owned accounts.
 
 ## Architecture
 
@@ -142,6 +144,16 @@ Dependencies:
 |---------|----------|----------|
 | Polygon | 137 | `https://clob.polymarket.com` |
 | Amoy (testnet) | 80002 | `https://clob.polymarket.com` |
+
+## Testing
+
+```bash
+# Unit tests (no credentials needed)
+make test
+
+# Integration tests (hit real CLOB API)
+POLYMARKET_PRIVATE_KEY=0x... go test -v -run TestIntegration -count=1
+```
 
 ## Examples
 
