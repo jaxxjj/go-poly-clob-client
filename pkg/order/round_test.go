@@ -31,10 +31,10 @@ func TestRoundNormal(t *testing.T) {
 		want float64
 	}{
 		{1.2345, 2, 1.23},
-		{1.235, 2, 1.24},  // rounds up at .5
+		{1.235, 2, 1.24}, // rounds up at .5
 		{1.999, 2, 2.00},
 		{0.50, 2, 0.50},
-		{0.005, 2, 0.01},  // 0.5 rounds up
+		{0.005, 2, 0.01}, // 0.5 rounds up
 	}
 	for _, tt := range tests {
 		got := RoundNormal(tt.x, tt.n)

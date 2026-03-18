@@ -125,7 +125,7 @@ func TestGetTickSize(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		w.WriteHeader(200)
-		_, _ = w.Write([]byte(`"0.001"`))
+		_, _ = w.Write([]byte(`{"minimum_tick_size":0.001}`))
 	}))
 	defer server.Close()
 
@@ -153,7 +153,7 @@ func TestGetTickSize(t *testing.T) {
 func TestGetNegRisk(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(200)
-		_, _ = w.Write([]byte(`true`))
+		_, _ = w.Write([]byte(`{"neg_risk":true}`))
 	}))
 	defer server.Close()
 
@@ -247,12 +247,12 @@ func TestPagination(t *testing.T) {
 
 		var resp []byte
 		if cursor == model.InitialCursor || cursor == "" {
-			resp, _ = json.Marshal(map[string]interface{}{
+			resp, _ = json.Marshal(map[string]any{
 				"data":        []map[string]string{{"id": "order1"}, {"id": "order2"}},
 				"next_cursor": "page2",
 			})
 		} else {
-			resp, _ = json.Marshal(map[string]interface{}{
+			resp, _ = json.Marshal(map[string]any{
 				"data":        []map[string]string{{"id": "order3"}},
 				"next_cursor": model.EndCursor,
 			})
@@ -329,14 +329,14 @@ func TestValidatePrice(t *testing.T) {
 		tickSize model.TickSize
 		wantErr  bool
 	}{
-		{0.50, model.TickSize001, false},   // valid
-		{0.01, model.TickSize001, false},   // min valid
-		{0.99, model.TickSize001, false},   // max valid
-		{0.005, model.TickSize001, true},   // below min
-		{0.995, model.TickSize001, true},   // above max
-		{0.1, model.TickSize01, false},     // min for 0.1 tick
-		{0.9, model.TickSize01, false},     // max for 0.1 tick
-		{0.05, model.TickSize01, true},     // below min for 0.1 tick
+		{0.50, model.TickSize001, false},     // valid
+		{0.01, model.TickSize001, false},     // min valid
+		{0.99, model.TickSize001, false},     // max valid
+		{0.005, model.TickSize001, true},     // below min
+		{0.995, model.TickSize001, true},     // above max
+		{0.1, model.TickSize01, false},       // min for 0.1 tick
+		{0.9, model.TickSize01, false},       // max for 0.1 tick
+		{0.05, model.TickSize01, true},       // below min for 0.1 tick
 		{0.0001, model.TickSize00001, false}, // min for 0.0001 tick
 		{0.9999, model.TickSize00001, false}, // max for 0.0001 tick
 	}
@@ -373,17 +373,17 @@ func TestCreateOrder_PriceValidation(t *testing.T) {
 		// Tick size and neg_risk endpoints
 		if r.URL.Path == "/tick-size" {
 			w.WriteHeader(200)
-			_, _ = w.Write([]byte(`"0.01"`))
+			_, _ = w.Write([]byte(`{"minimum_tick_size":0.01}`))
 			return
 		}
 		if r.URL.Path == "/neg-risk" {
 			w.WriteHeader(200)
-			_, _ = w.Write([]byte(`false`))
+			_, _ = w.Write([]byte(`{"neg_risk":false}`))
 			return
 		}
 		if r.URL.Path == "/fee-rate" {
 			w.WriteHeader(200)
-			_, _ = w.Write([]byte(`0`))
+			_, _ = w.Write([]byte(`{"base_fee":0}`))
 			return
 		}
 		w.WriteHeader(200)

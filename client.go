@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -218,17 +219,11 @@ func (c *Client) GetTickSize(ctx context.Context, tokenID string) (model.TickSiz
 		return "", err
 	}
 
-	var resp struct {
-		MinimumTickSize string `json:"minimum_tick_size"`
+	raw, err := parseJSONField[float64](body, "minimum_tick_size")
+	if err != nil {
+		return "", fmt.Errorf("parse tick size: %w", err)
 	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		// Fallback: try parsing as bare string (e.g., "0.01")
-		ts := model.TickSize(strings.Trim(string(body), `"`))
-		c.tickSizeCache.Set(tokenID, ts)
-		return ts, nil
-	}
-
-	ts := model.TickSize(resp.MinimumTickSize)
+	ts := model.TickSize(strconv.FormatFloat(raw, 'f', -1, 64))
 	c.tickSizeCache.Set(tokenID, ts)
 	return ts, nil
 }
@@ -244,20 +239,12 @@ func (c *Client) GetNegRisk(ctx context.Context, tokenID string) (bool, error) {
 		return false, err
 	}
 
-	var resp struct {
-		NegRisk bool `json:"neg_risk"`
+	nr, err := parseJSONField[bool](body, "neg_risk")
+	if err != nil {
+		return false, err
 	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		// Fallback: try parsing as bare boolean
-		var nr bool
-		if err2 := json.Unmarshal(body, &nr); err2 != nil {
-			return false, fmt.Errorf("parse neg_risk: %w", err)
-		}
-		c.negRiskCache.Set(tokenID, nr)
-		return nr, nil
-	}
-	c.negRiskCache.Set(tokenID, resp.NegRisk)
-	return resp.NegRisk, nil
+	c.negRiskCache.Set(tokenID, nr)
+	return nr, nil
 }
 
 // GetFeeRateBps returns the fee rate in basis points for a token (cached).
@@ -271,20 +258,13 @@ func (c *Client) GetFeeRateBps(ctx context.Context, tokenID string) (int, error)
 		return 0, err
 	}
 
-	var resp struct {
-		BaseFee int `json:"base_fee"`
+	frFloat, err := parseJSONField[float64](body, "base_fee")
+	if err != nil {
+		return 0, err
 	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		// Fallback: try parsing as bare int
-		var fr int
-		if err2 := json.Unmarshal(body, &fr); err2 != nil {
-			return 0, fmt.Errorf("parse fee_rate: %w", err)
-		}
-		c.feeRateCache.Set(tokenID, fr)
-		return fr, nil
-	}
-	c.feeRateCache.Set(tokenID, resp.BaseFee)
-	return resp.BaseFee, nil
+	fr := int(frFloat)
+	c.feeRateCache.Set(tokenID, fr)
+	return fr, nil
 }
 
 // GetMarket returns market details by condition ID.
@@ -452,7 +432,7 @@ func (c *Client) PostOrder(ctx context.Context, signed *gomodel.SignedOrder, ord
 		return nil, fmt.Errorf("post_only orders can only be of type GTC or GTD")
 	}
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"order":     signedOrderToMap(signed),
 		"owner":     c.creds.APIKey,
 		"orderType": string(orderType),
@@ -471,9 +451,35 @@ func (c *Client) CreateAndPostOrder(ctx context.Context, args model.OrderArgs, o
 	return c.PostOrder(ctx, signed, model.OrderTypeGTC, false)
 }
 
+// PostOrders submits multiple signed orders in a single request.
+func (c *Client) PostOrders(ctx context.Context, orders []PostOrdersArg) (json.RawMessage, error) {
+	if err := c.requireL2(); err != nil {
+		return nil, err
+	}
+
+	payload := make([]map[string]any, len(orders))
+	for i, arg := range orders {
+		payload[i] = map[string]any{
+			"order":     signedOrderToMap(arg.Order),
+			"owner":     c.creds.APIKey,
+			"orderType": string(arg.OrderType),
+			"postOnly":  arg.PostOnly,
+		}
+	}
+
+	return c.postL2(ctx, model.EndpointOrders, payload)
+}
+
+// PostOrdersArg holds a single order for batch posting.
+type PostOrdersArg struct {
+	Order     *gomodel.SignedOrder
+	OrderType model.OrderType
+	PostOnly  bool
+}
+
 // Cancel cancels an order by ID.
 func (c *Client) Cancel(ctx context.Context, orderID string) (json.RawMessage, error) {
-	return c.deleteL2(ctx, model.EndpointOrder, map[string]interface{}{"orderID": orderID})
+	return c.deleteL2(ctx, model.EndpointOrder, map[string]any{"orderID": orderID})
 }
 
 // CancelOrders cancels multiple orders by ID.
@@ -488,7 +494,7 @@ func (c *Client) CancelAll(ctx context.Context) (json.RawMessage, error) {
 
 // CancelMarketOrders cancels all orders for a specific market or asset.
 func (c *Client) CancelMarketOrders(ctx context.Context, market, assetID string) (json.RawMessage, error) {
-	return c.deleteL2(ctx, model.EndpointCancelMarketOrders, map[string]interface{}{
+	return c.deleteL2(ctx, model.EndpointCancelMarketOrders, map[string]any{
 		"market":   market,
 		"asset_id": assetID,
 	})
@@ -496,7 +502,7 @@ func (c *Client) CancelMarketOrders(ctx context.Context, market, assetID string)
 
 // PostHeartbeat sends a heartbeat to prevent auto-cancellation of orders.
 func (c *Client) PostHeartbeat(ctx context.Context, heartbeatID string) (json.RawMessage, error) {
-	return c.postL2(ctx, model.EndpointHeartbeat, map[string]interface{}{
+	return c.postL2(ctx, model.EndpointHeartbeat, map[string]any{
 		"heartbeat_id": heartbeatID,
 	})
 }
@@ -629,7 +635,7 @@ func (c *Client) l2Headers(method, path string, body []byte) (http.Header, error
 	return headers.BuildL2(c.address, *c.creds, method, path, body)
 }
 
-func (c *Client) postL2(ctx context.Context, path string, payload interface{}) (json.RawMessage, error) {
+func (c *Client) postL2(ctx context.Context, path string, payload any) (json.RawMessage, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal payload: %w", err)
@@ -642,7 +648,7 @@ func (c *Client) postL2(ctx context.Context, path string, payload interface{}) (
 	return c.doRequest(ctx, "POST", path, h, body)
 }
 
-func (c *Client) deleteL2(ctx context.Context, path string, payload interface{}) (json.RawMessage, error) {
+func (c *Client) deleteL2(ctx context.Context, path string, payload any) (json.RawMessage, error) {
 	var body []byte
 	if payload != nil {
 		var err error
@@ -726,38 +732,26 @@ func (c *Client) resolveOrderOptions(ctx context.Context, tokenID string, opts *
 	return resolved, nil
 }
 
-// PostOrders submits multiple signed orders in a single request.
-func (c *Client) PostOrders(ctx context.Context, orders []PostOrdersArg) (json.RawMessage, error) {
-	if err := c.requireL2(); err != nil {
-		return nil, err
+func parseJSONField[T any](body []byte, key string) (T, error) {
+	var obj map[string]json.RawMessage
+	var zero T
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return zero, fmt.Errorf("parse response: %w", err)
 	}
-
-	payload := make([]map[string]interface{}, len(orders))
-	for i, arg := range orders {
-		entry := map[string]interface{}{
-			"order":     signedOrderToMap(arg.Order),
-			"owner":     c.creds.APIKey,
-			"orderType": string(arg.OrderType),
-		}
-		if arg.PostOnly {
-			entry["postOnly"] = true
-		}
-		payload[i] = entry
+	raw, ok := obj[key]
+	if !ok {
+		return zero, fmt.Errorf("missing field %q in response", key)
 	}
-
-	return c.postL2(ctx, model.EndpointOrders, payload)
-}
-
-// PostOrdersArg holds a single order for batch posting.
-type PostOrdersArg struct {
-	Order     *gomodel.SignedOrder
-	OrderType model.OrderType
-	PostOnly  bool
+	var v T
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return zero, fmt.Errorf("parse field %q: %w", key, err)
+	}
+	return v, nil
 }
 
 func validatePrice(price float64, ts model.TickSize) error {
-	tsFloat := tickSizeToFloat(ts)
-	if tsFloat == 0 {
+	tsFloat, err := strconv.ParseFloat(string(ts), 64)
+	if err != nil || tsFloat == 0 {
 		return nil // unknown tick size, skip validation
 	}
 	minPrice := tsFloat
@@ -769,24 +763,21 @@ func validatePrice(price float64, ts model.TickSize) error {
 	return nil
 }
 
-func tickSizeToFloat(ts model.TickSize) float64 {
-	switch ts {
-	case model.TickSize01:
-		return 0.1
-	case model.TickSize001:
-		return 0.01
-	case model.TickSize0001:
-		return 0.001
-	case model.TickSize00001:
-		return 0.0001
-	default:
-		return 0
+// signedOrderToMap serializes a SignedOrder to the JSON format expected by the CLOB API.
+//
+// Field types must match py-order-utils SignedOrder.dict() exactly:
+//   - salt: integer
+//   - side: string "BUY"/"SELL" (converted from 0/1)
+//   - signatureType: integer
+//   - makerAmount, takerAmount, tokenId, expiration, nonce, feeRateBps: string
+func signedOrderToMap(s *gomodel.SignedOrder) map[string]any {
+	side := "BUY"
+	if s.Side.Int64() == 1 {
+		side = "SELL"
 	}
-}
 
-func signedOrderToMap(s *gomodel.SignedOrder) map[string]interface{} {
-	return map[string]interface{}{
-		"salt":          s.Salt.String(),
+	return map[string]any{
+		"salt":          s.Salt.Int64(),
 		"maker":         s.Maker.Hex(),
 		"signer":        s.Signer.Hex(),
 		"taker":         s.Taker.Hex(),
@@ -796,8 +787,8 @@ func signedOrderToMap(s *gomodel.SignedOrder) map[string]interface{} {
 		"expiration":    s.Expiration.String(),
 		"nonce":         s.Nonce.String(),
 		"feeRateBps":    s.FeeRateBps.String(),
-		"side":          s.Side.String(),
-		"signatureType": s.SignatureType.String(),
+		"side":          side,
+		"signatureType": int(s.SignatureType.Int64()),
 		"signature":     "0x" + common.Bytes2Hex(s.Signature),
 	}
 }

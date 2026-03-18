@@ -11,23 +11,23 @@ const (
 	EndpointDeriveAPIKey = "/auth/derive-api-key"
 
 	// Auth (L2)
-	EndpointGetAPIKeys    = "/auth/api-keys"
-	EndpointDeleteAPIKey  = "/auth/api-key"
-	EndpointClosedOnly    = "/auth/ban-status/closed-only"
+	EndpointGetAPIKeys   = "/auth/api-keys"
+	EndpointDeleteAPIKey = "/auth/api-key"
+	EndpointClosedOnly   = "/auth/ban-status/closed-only"
 
 	// Market data (L0)
-	EndpointMidpoint        = "/midpoint"
-	EndpointMidpoints       = "/midpoints"
-	EndpointPrice           = "/price"
-	EndpointPrices          = "/prices"
-	EndpointSpread          = "/spread"
-	EndpointSpreads         = "/spreads"
-	EndpointTickSize        = "/tick-size"
-	EndpointNegRisk         = "/neg-risk"
-	EndpointFeeRate         = "/fee-rate"
-	EndpointBook            = "/book"
-	EndpointBooks           = "/books"
-	EndpointLastTradePrice  = "/last-trade-price"
+	EndpointMidpoint         = "/midpoint"
+	EndpointMidpoints        = "/midpoints"
+	EndpointPrice            = "/price"
+	EndpointPrices           = "/prices"
+	EndpointSpread           = "/spread"
+	EndpointSpreads          = "/spreads"
+	EndpointTickSize         = "/tick-size"
+	EndpointNegRisk          = "/neg-risk"
+	EndpointFeeRate          = "/fee-rate"
+	EndpointBook             = "/book"
+	EndpointBooks            = "/books"
+	EndpointLastTradePrice   = "/last-trade-price"
 	EndpointLastTradesPrices = "/last-trades-prices"
 
 	// Markets (L0)
@@ -37,9 +37,9 @@ const (
 	EndpointSamplingSimplifiedMarkets = "/sampling-simplified-markets"
 
 	// Orders (L2)
-	EndpointOrder             = "/order"
-	EndpointOrders            = "/orders"
-	EndpointCancelAll         = "/cancel-all"
+	EndpointOrder              = "/order"
+	EndpointOrders             = "/orders"
+	EndpointCancelAll          = "/cancel-all"
 	EndpointCancelMarketOrders = "/cancel-market-orders"
 
 	// Order data (L2)

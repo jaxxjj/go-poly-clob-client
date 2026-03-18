@@ -16,7 +16,6 @@ import (
 //
 // The signature message is: timestamp + method + path [+ body]
 func SignHMAC(secret, timestamp, method, path string, body []byte) (string, error) {
-	// Use RawURLEncoding to tolerate secrets without padding (matching Python's urlsafe_b64decode).
 	key, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(secret, "="))
 	if err != nil {
 		return "", fmt.Errorf("decode api secret: %w", err)

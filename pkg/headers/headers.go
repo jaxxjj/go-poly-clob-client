@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -56,7 +57,13 @@ func BuildL2(
 ) (http.Header, error) {
 	timestamp := fmt.Sprintf("%d", time.Now().Unix())
 
-	sig, err := auth.SignHMAC(creds.APISecret, timestamp, method, path, body)
+	// HMAC is computed over the base path only, without query parameters.
+	sigPath := path
+	if idx := strings.IndexByte(sigPath, '?'); idx != -1 {
+		sigPath = sigPath[:idx]
+	}
+
+	sig, err := auth.SignHMAC(creds.APISecret, timestamp, method, sigPath, body)
 	if err != nil {
 		return nil, fmt.Errorf("sign hmac: %w", err)
 	}
