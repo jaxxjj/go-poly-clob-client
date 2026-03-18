@@ -354,18 +354,10 @@ func (c *Client) CreateOrder(ctx context.Context, args model.OrderArgs, opts *mo
 	if err != nil {
 		return nil, err
 	}
-
-	// Validate price bounds: [tick_size, 1 - tick_size]
 	if err := validatePrice(args.Price, resolved.TickSize); err != nil {
 		return nil, err
 	}
-
-	if args.FeeRateBps == 0 {
-		fr, frErr := c.GetFeeRateBps(ctx, args.TokenID)
-		if frErr == nil {
-			args.FeeRateBps = fr
-		}
-	}
+	args.FeeRateBps = c.resolveFeeRate(ctx, args.TokenID, args.FeeRateBps)
 
 	return c.orderBuilder.CreateOrder(args, resolved)
 }
@@ -376,25 +368,11 @@ func (c *Client) CreateMarketOrder(ctx context.Context, args model.MarketOrderAr
 		return nil, err
 	}
 
-	// Auto-calculate price from order book if not provided
 	if args.Price <= 0 {
-		ob, err := c.GetOrderBook(ctx, args.TokenID)
+		var err error
+		args.Price, err = c.calculateMarketPrice(ctx, args)
 		if err != nil {
-			return nil, fmt.Errorf("get order book for price: %w", err)
-		}
-
-		ot := args.OrderType
-		if ot == "" {
-			ot = model.OrderTypeFOK
-		}
-
-		if args.Side == "BUY" {
-			args.Price, err = order.CalculateBuyMarketPrice(ob.Asks, args.Amount, ot)
-		} else {
-			args.Price, err = order.CalculateSellMarketPrice(ob.Bids, args.Amount, ot)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("calculate market price: %w", err)
+			return nil, err
 		}
 	}
 
@@ -402,20 +380,41 @@ func (c *Client) CreateMarketOrder(ctx context.Context, args model.MarketOrderAr
 	if err != nil {
 		return nil, err
 	}
-
-	// Validate price bounds
 	if err := validatePrice(args.Price, resolved.TickSize); err != nil {
 		return nil, err
 	}
-
-	if args.FeeRateBps == 0 {
-		fr, frErr := c.GetFeeRateBps(ctx, args.TokenID)
-		if frErr == nil {
-			args.FeeRateBps = fr
-		}
-	}
+	args.FeeRateBps = c.resolveFeeRate(ctx, args.TokenID, args.FeeRateBps)
 
 	return c.orderBuilder.CreateMarketOrder(args, resolved)
+}
+
+func (c *Client) calculateMarketPrice(ctx context.Context, args model.MarketOrderArgs) (float64, error) {
+	ob, err := c.GetOrderBook(ctx, args.TokenID)
+	if err != nil {
+		return 0, fmt.Errorf("get order book for price: %w", err)
+	}
+
+	ot := args.OrderType
+	if ot == "" {
+		ot = model.OrderTypeFOK
+	}
+
+	if args.Side == "BUY" {
+		return order.CalculateBuyMarketPrice(ob.Asks, args.Amount, ot)
+	}
+	return order.CalculateSellMarketPrice(ob.Bids, args.Amount, ot)
+}
+
+// resolveFeeRate returns the provided fee rate, or fetches it from the API if zero.
+func (c *Client) resolveFeeRate(ctx context.Context, tokenID string, current int) int {
+	if current != 0 {
+		return current
+	}
+	fr, err := c.GetFeeRateBps(ctx, tokenID)
+	if err != nil {
+		return 0
+	}
+	return fr
 }
 
 // ---------------------------------------------------------------------------
@@ -531,15 +530,7 @@ func (c *Client) GetOrders(ctx context.Context, params *model.OpenOrderParams) (
 
 // GetOrder returns a single order by ID.
 func (c *Client) GetOrder(ctx context.Context, orderID string) (json.RawMessage, error) {
-	if err := c.requireL2(); err != nil {
-		return nil, err
-	}
-
-	h, err := c.l2Headers("GET", model.EndpointDataOrder+"/"+orderID, nil)
-	if err != nil {
-		return nil, err
-	}
-	return c.doRequest(ctx, "GET", model.EndpointDataOrder+"/"+orderID, h, nil)
+	return c.getL2(ctx, model.EndpointDataOrder+"/"+orderID)
 }
 
 // GetTrades returns trade history (paginated, fetches all pages).
@@ -561,10 +552,6 @@ func (c *Client) GetTrades(ctx context.Context, params *model.TradeParams) ([]js
 
 // GetBalanceAllowance returns the balance and allowance for a given asset.
 func (c *Client) GetBalanceAllowance(ctx context.Context, params model.BalanceAllowanceParams) (json.RawMessage, error) {
-	if err := c.requireL2(); err != nil {
-		return nil, err
-	}
-
 	sigType := params.SignatureType
 	if sigType < 0 {
 		sigType = c.sigType
@@ -575,25 +562,12 @@ func (c *Client) GetBalanceAllowance(ctx context.Context, params model.BalanceAl
 	if params.TokenID != "" {
 		path += "&token_id=" + params.TokenID
 	}
-
-	h, err := c.l2Headers("GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-	return c.doRequest(ctx, "GET", path, h, nil)
+	return c.getL2(ctx, path)
 }
 
 // GetAPIKeys lists all API keys for the authenticated user.
 func (c *Client) GetAPIKeys(ctx context.Context) (json.RawMessage, error) {
-	if err := c.requireL2(); err != nil {
-		return nil, err
-	}
-
-	h, err := c.l2Headers("GET", model.EndpointGetAPIKeys, nil)
-	if err != nil {
-		return nil, err
-	}
-	return c.doRequest(ctx, "GET", model.EndpointGetAPIKeys, h, nil)
+	return c.getL2(ctx, model.EndpointGetAPIKeys)
 }
 
 // DeleteAPIKey deletes the current API key.
@@ -635,6 +609,17 @@ func (c *Client) l2Headers(method, path string, body []byte) (http.Header, error
 	return headers.BuildL2(c.address, *c.creds, method, path, body)
 }
 
+func (c *Client) getL2(ctx context.Context, path string) (json.RawMessage, error) {
+	if err := c.requireL2(); err != nil {
+		return nil, err
+	}
+	h, err := c.l2Headers("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.doRequest(ctx, "GET", path, h, nil)
+}
+
 func (c *Client) postL2(ctx context.Context, path string, payload any) (json.RawMessage, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -649,20 +634,26 @@ func (c *Client) postL2(ctx context.Context, path string, payload any) (json.Raw
 }
 
 func (c *Client) deleteL2(ctx context.Context, path string, payload any) (json.RawMessage, error) {
-	var body []byte
-	if payload != nil {
-		var err error
-		body, err = json.Marshal(payload)
-		if err != nil {
-			return nil, fmt.Errorf("marshal payload: %w", err)
-		}
+	body, err := marshalOptional(payload)
+	if err != nil {
+		return nil, err
 	}
-
 	h, err := c.l2Headers("DELETE", path, body)
 	if err != nil {
 		return nil, err
 	}
 	return c.doRequest(ctx, "DELETE", path, h, body)
+}
+
+func marshalOptional(v any) ([]byte, error) {
+	if v == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("marshal payload: %w", err)
+	}
+	return b, nil
 }
 
 func (c *Client) paginateL2(ctx context.Context, basePath string) ([]json.RawMessage, error) {
